@@ -9,6 +9,18 @@ Scraper for wechat moments.
 5. Render the data..? Data processing module coming soon
 ## CAN ONLY BE USED ON WINDOWS!!! ##
 
+Data you can expect
+<img width="873" alt="data_collected" src="https://user-images.githubusercontent.com/60602265/213367076-12ef39b7-efff-4c26-8d53-6033ac9684bd.png">
+
+
 Other two files are for legacy CSV version. Don't use them, probably.
 
 Will probably have some unexpected bugs, look through the adomination if you want... But overall, it should work fine.
+
+# Todo
+- Fix this abomination
+
+<img width="630" alt="what the hell" src="https://user-images.githubusercontent.com/60602265/213367001-739212ba-e0ae-4535-a8ec-b82d5e4c6e60.png">
+
+- Add data processing module
+- Code cleanup overall... Rewrite of many areas
