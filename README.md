@@ -1,6 +1,9 @@
 # Wechat-Moments-Scraper
 Scraper for wechat moments.
 
+# Credits:
+  - https://github.com/HYLZ-2019/FriendsOfFriends used as base.
+
 # Usage
 1. Setup a Postgres database and edit the connection variables at the top of Scraper.py.
 2. Edit the MAX_PYQ post for number of posts to scrape. I suggest staying below 200.
