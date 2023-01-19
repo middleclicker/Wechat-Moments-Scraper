@@ -18,9 +18,9 @@ Other two files are for legacy CSV version. Don't use them, probably.
 Will probably have some unexpected bugs, look through the adomination if you want... But overall, it should work fine.
 
 # Todo
-- Fix this abomination
+- ~~Fix this abomination~~ Added comments, fixed logic errors
 
 <img width="630" alt="what the hell" src="https://user-images.githubusercontent.com/60602265/213367001-739212ba-e0ae-4535-a8ec-b82d5e4c6e60.png">
 
 - Add data processing module
-- Code cleanup overall... Rewrite of many areas
+- ~~Code cleanup overall... Probably a full rewrite of many areas~~ Best I can do for now
