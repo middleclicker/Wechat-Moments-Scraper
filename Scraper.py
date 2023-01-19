@@ -1,6 +1,5 @@
 import math
 import re
-import sys
 import time as t
 from datetime import datetime
 
@@ -13,7 +12,7 @@ from pywinauto import mouse
 from pywinauto.application import Application
 
 # User Settings
-MAX_PYQ = 50
+MAX_PYQ = 100
 SCRAPER_NAME = "Middleclicker"
 REFRESH_DELAY = 1
 UPDATE_FREQ = 5
@@ -25,7 +24,7 @@ RANDOMIZED_REFRESH_DELAY = False
 
 HOSTNAME = ""
 DATABASE = "Posts"
-USERNAME = ""
+USERNAME = "middleclicker"
 PWD = ""
 PORT_ID = 5432
 conn = None
@@ -156,6 +155,8 @@ try:
     cur.execute('SELECT COUNT(*) FROM posts;', data)
     results = cur.fetchone()
     total_posts = results[0]
+
+    print(f"Starting Post Count: {total_posts}")
 
     all_pyq = []
     pyq_uuids = set()
@@ -295,8 +296,8 @@ try:
                         pyq_info.append(datetime.now())
                         pyq_info.append(SCRAPER_NAME)
 
-                        total_posts += 1
-                        pyq_info.append(total_posts)  # Until I figure out how to use grafana properly
+                        #total_posts += 1
+                        #pyq_info.append(total_posts)  # Until I figure out how to use grafana properly
 
                         all_pyq.append(pyq_info)
                 except Exception as e:
@@ -315,8 +316,14 @@ try:
         elif post_count == MAX_PYQ and not has_updated:
             print("Finished Data Collection, entering monitoring mode")
             for e in all_pyq[post_count - UPDATE_FREQ:post_count]:
+                data = []
+                cur.execute('SELECT COUNT(*) FROM posts;', data)
+                results = cur.fetchone()
+                total_posts = results[0]
                 try:
-                    cur.execute(insert_script, e)
+                    new_e = e
+                    new_e.append(total_posts + 1)
+                    cur.execute(insert_script, new_e)
                 except psycopg2.IntegrityError:  # Ignore duplicated key error
                     conn.rollback()
                 else:
@@ -326,10 +333,16 @@ try:
             t.sleep(REFRESH_DELAY)
             mouse.click(coords=refresh)  # Refresh
         if post_count % UPDATE_FREQ == 0:
-            for e in all_pyq[post_count - 10:post_count]:
+            for e in all_pyq[post_count - UPDATE_FREQ:post_count]:
+                data = []
+                cur.execute('SELECT COUNT(*) FROM posts;', data)
+                results = cur.fetchone()
+                total_posts = results[0]
                 try:
-                    cur.execute(insert_script, e)
-                except psycopg2.IntegrityError:
+                    new_e = e
+                    new_e.append(total_posts+1)
+                    cur.execute(insert_script, new_e)
+                except psycopg2.IntegrityError:  # Ignore duplicated key error
                     conn.rollback()
                 else:
                     conn.commit()
