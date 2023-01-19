@@ -15,9 +15,6 @@ Scraper for wechat moments.
 Data you can expect
 <img width="873" alt="data_collected" src="https://user-images.githubusercontent.com/60602265/213367076-12ef39b7-efff-4c26-8d53-6033ac9684bd.png">
 
-
-Other two files are for legacy CSV version. Don't use them, probably.
-
 Will probably have some unexpected bugs, look through the adomination if you want... But overall, it should work fine.
 
 # Todo
