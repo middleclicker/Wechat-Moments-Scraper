@@ -13,7 +13,7 @@ from pywinauto import mouse
 from pywinauto.application import Application
 
 # User Settings
-MAX_PYQ = 1
+MAX_PYQ = 50
 SCRAPER_NAME = "Middleclicker"
 REFRESH_DELAY = 1
 UPDATE_FREQ = 5
@@ -25,15 +25,17 @@ RANDOMIZED_REFRESH_DELAY = False
 
 HOSTNAME = ""
 DATABASE = "Posts"
-USERNAME = "middleclicker"
+USERNAME = ""
 PWD = ""
 PORT_ID = 5432
 conn = None
 cur = None
 
+
 # Helper Classes
-class GetOutOfLoop( Exception ):
+class GetOutOfLoop(Exception):
     pass
+
 
 # Helper Functions
 def DFS(win, layers):
@@ -97,6 +99,7 @@ def process_raw_media(raw_media):
     else:  # NA
         return 0
 
+
 try:
     # ------------Wechat PID Hook------------
     PID = 0
@@ -118,18 +121,18 @@ try:
     # Create data storage table
     build_table = ''' CREATE TABLE IF NOT EXISTS posts
     (
-        uuid        int PRIMARY KEY NOT NULL,
-        name        text NOT NULL,
-        content     text,
-        media       int,
-        date        date,
-        likes       text,
-        like_count  int NOT NULL,
-        comments    text,
-        comment_count int NOT NULL,
-        scraped_date timestamp NOT NULL,
-        contributor  text NOT NULL,
-        count       int   
+        uuid            int             PRIMARY KEY NOT NULL,
+        name            text            NOT NULL,
+        content         text,
+        media           int,
+        date            date,
+        likes           text,
+        like_count      int             NOT NULL,
+        comments        text,
+        comment_count   int             NOT NULL,
+        scraped_date    timestamptz     NOT NULL,
+        contributor     text            NOT NULL,
+        count           int   
     );'''
     insert_script = ''' INSERT INTO posts 
     (
@@ -172,14 +175,14 @@ try:
             for pyq in pyqs:
                 try:
                     pyq_info = []
-                    if (pyq.friendly_class_name() == "ListItem"): # Post detected
+                    if (pyq.friendly_class_name() == "ListItem"):  # Post detected
                         processed_pyq = replace_emoji(pyq.window_text()).split('\n')
 
                         lineCount = len(processed_pyq)
 
                         author = processed_pyq[0]
                         pyq_contents = "".join(processed_pyq[1:lineCount - 3])
-                        
+
                         if "包含" in processed_pyq[lineCount - 3] or "视频" in processed_pyq[lineCount - 3]:
                             # 文案：      有/无
                             # 图片 / 视频：有
@@ -236,6 +239,10 @@ try:
                             media = "NA"
                             time = processed_pyq[lineCount - 2]
 
+                        processed_time = calc_time(time)
+                        if processed_time == -1:
+                            raise GetOutOfLoop
+
                         uuid_time = processed_time.split('-')[0] + ":" + processed_time.split('-')[1] + ":" + \
                                     processed_time.split('-')[2]
                         uuid = generate_uuid(pyq_contents, author, uuid_time)
@@ -244,9 +251,6 @@ try:
                             last_content_cnt += 1
                             continue
                         pyq_uuids.add(pyq_contents)
-                        processed_time = calc_time(time)
-                        if processed_time == -1:
-                            raise GetOutOfLoop
 
                         pyq_info.append(uuid)
                         pyq_info.append(author)
@@ -292,7 +296,7 @@ try:
                         pyq_info.append(SCRAPER_NAME)
 
                         total_posts += 1
-                        pyq_info.append(total_posts) # Until I figure out how to use grafana properly
+                        pyq_info.append(total_posts)  # Until I figure out how to use grafana properly
 
                         all_pyq.append(pyq_info)
                 except Exception as e:
@@ -304,16 +308,16 @@ try:
             pass
 
         post_count = len(all_pyq)
-        refresh = (pyq_win.rectangle().left+50, pyq_win.rectangle().top+10)
-        scroll = (pyq_win.rectangle().left+10, pyq_win.rectangle().bottom-10)
-        if post_count < MAX_PYQ: # Scroll Down
+        refresh = (pyq_win.rectangle().left + 50, pyq_win.rectangle().top + 10)
+        scroll = (pyq_win.rectangle().left + 10, pyq_win.rectangle().bottom - 10)
+        if post_count < MAX_PYQ:  # Scroll Down
             pywinauto.mouse.scroll(wheel_dist=-SCROLL_DIST, coords=scroll)
         elif post_count == MAX_PYQ and not has_updated:
             print("Finished Data Collection, entering monitoring mode")
             for e in all_pyq[post_count - UPDATE_FREQ:post_count]:
                 try:
                     cur.execute(insert_script, e)
-                except psycopg2.IntegrityError: # Ignore duplicated key error
+                except psycopg2.IntegrityError:  # Ignore duplicated key error
                     conn.rollback()
                 else:
                     conn.commit()
@@ -322,7 +326,7 @@ try:
             t.sleep(REFRESH_DELAY)
             mouse.click(coords=refresh)  # Refresh
         if post_count % UPDATE_FREQ == 0:
-            for e in all_pyq[post_count-10:post_count]:
+            for e in all_pyq[post_count - 10:post_count]:
                 try:
                     cur.execute(insert_script, e)
                 except psycopg2.IntegrityError:
