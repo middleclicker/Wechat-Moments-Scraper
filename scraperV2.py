@@ -11,8 +11,8 @@ import pywinauto
 from pywinauto import mouse
 from pywinauto.application import Application
 
-# User Settings
-MAX_PYQ = 1000 # its fine the week limit thing will take care of this
+# region User Settings
+MAX_PYQ = 1  # its fine the week limit thing will take care of this
 SCRAPER_NAME = "Middleclicker"
 REFRESH_DELAY = 1
 UPDATE_FREQ = 1
@@ -30,14 +30,125 @@ PWD = ""
 PORT_ID = 5432
 conn = None
 cur = None
+# endregion
+# region Notes
+# Always use triple quotes quotes for SQL commands and single quotes for names.
+# Data structure:
+# Post:
+#   0: UUID
+#   1: Author
+#   2: Content
+#   3: Media Count
+#   4: Time
+#   5: Likes
+#   6: Like Count
+#   7: Comments
+#   8: Comment Count
+#   9: Scraped Time
+#   10: Scraper Name
+# User:
+#   0: Name
+#   1: Total Posts
+#   2: Total Media
+#   3: Total Words
+#   4: Total Word Count Eng
+#   5: Total Word Count Chn
+#   6: Total Emoji Count
+#   7: Likes recieved
+#   8: Comments recieved
+#   9: Likes given
+#   10: Comments given
+#   11: Freq likes
+#   12: Freq likes to
+#   13: Freq commenters
+#   14: Freq comments to
+#   15: Active dates
+#   16: Count
+# endregion
+# region Helper Scripts
+build_posts_table = ''' CREATE TABLE IF NOT EXISTS posts
+(
+    uuid            int             PRIMARY KEY NOT NULL,
+    name            text            NOT NULL,
+    content         text,
+    media           int,
+    date            date,
+    likes           text,
+    like_count      int             NOT NULL,
+    comments        text,
+    comment_count   int             NOT NULL,
+    scraped_date    timestamptz     NOT NULL,
+    contributor     text            NOT NULL,
+    count           int   
+);'''
+build_user_table = ''' CREATE TABLE IF NOT EXISTS users
+(
+    name                    text            PRIMARY KEY NOT NULL,
+    total_posts             int             NOT NULL,
+    total_media             int             NOT NULL,
+    total_words             int             NOT NULL,
+    total_word_count_eng    int             NOT NULL,
+    total_word_count_chn    int             NOT NULL,
+    total_emoji_count       int             NOT NULL,
+    total_likes_recieved    int             NOT NULL,
+    total_comments_recieved int             NOT NULL,
+    total_likes_given       int             NOT NULL,
+    total_comments_given    int             NOT NULL,
+    frequent_likes          jsonb,
+    frequent_likes_to       jsonb,
+    frequent_commenters     jsonb,
+    frequent_comments_to    jsonb,
+    active_dates            jsonb,
+    count                   int
+);'''
+posts_insert_script = ''' INSERT INTO posts 
+(
+    uuid, 
+    name, 
+    content, 
+    media, 
+    date, 
+    likes, 
+    like_count, 
+    comments, 
+    comment_count, 
+    scraped_date, 
+    contributor, 
+    count
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);'''
+user_insert_script = ''' INSERT INTO users
+(
+    name,
+    total_posts,
+    total_media,
+    total_words,
+    total_word_count_eng,
+    total_word_count_chn,
+    total_emoji_count,
+    total_likes_recieved,
+    total_comments_recieved,
+    total_likes_given,
+    total_comments_given,
+    frequent_likes,
+    frequent_likes_to,
+    frequent_commenters,
+    frequent_comments_to,
+    active_dates,
+    count
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);'''
+get_post_count = '''SELECT COUNT(*) FROM posts;'''
+get_posts = '''SELECT * FROM posts ORDER BY count ASC'''
+get_user_count = '''SELECT COUNT(*) FROM users;'''
 
 
-# Helper Classes
+# endregion
+# region Helper Classes
 class GetOutOfLoop(Exception):
     pass
 
 
-# Helper Functions
+# endregion
+# region Helper Functions
 def DFS(win, layers):
     children = []
     last_layer = [win]
@@ -253,8 +364,7 @@ def logScrapeStatistics(initialPostCount, endPostCount, initialUserCount, endUse
     print("-------------------")
 
 
-try:
-    # ------------Wechat PID Hook------------
+def getPID():
     PID = 0
     for proc in psutil.process_iter():
         try:
@@ -264,112 +374,135 @@ try:
         else:
             if 'WeChat.exe' == pinfo['name']:
                 PID = pinfo['pid']
+    return PID
 
-    app = Application(backend='uia').connect(process=PID)
 
-    # ------------Database------------
+def setupDatabaseTables(cur):
+    cur.execute(build_posts_table)
+    cur.execute(build_user_table)
+
+
+def getPostCount(cur):
+    cur.execute(get_post_count)
+    postCount = cur.fetchone()[0]
+    return postCount
+
+
+def pyqContentCases(processed_pyq):
+    author = processed_pyq[0]
+    lineCount = len(processed_pyq)
+    pyq_contents = "".join(processed_pyq[1:lineCount - 3])
+    if "包含" in processed_pyq[lineCount - 3] or "视频" in processed_pyq[lineCount - 3]:
+        # 文案：      有/无
+        # 图片 / 视频：有
+        # 地点：      无
+        # 嵌入链接：   无
+
+        # 文案：有
+        # ['middleclicker', 'abc', 'efg', '包含2张图片 / 视频', '1分钟前', '']
+        # ['middleclicker', 'abc', '包含2张图片 / 视频', '1分钟前', '']
+        media = processed_pyq[lineCount - 3]
+        time = processed_pyq[lineCount - 2]
+
+        # 文案：无
+        # ['middleclicker', '包含2张图片 / 视频', '1分钟前', '']
+        if "包含" in processed_pyq[1] or "视频" in processed_pyq[1]:
+            pyq_contents = "NA"
+    elif "包含" in processed_pyq[lineCount - 4] or "视频" in processed_pyq[lineCount - 4]:
+        # 文案：      有/无
+        # 图片 / 视频：有
+        # 地点：      有
+        # 嵌入链接：   无
+
+        # 文案：有
+        # ['middleclicker', 'abc', 'efg', '包含2张图片 / 视频', '深圳国际交流监狱', '1分钟前', '']
+        media = processed_pyq[lineCount - 4]
+        time = processed_pyq[lineCount - 2]
+
+        # 文案：无
+        # ['middleclicker', '包含2张图片 / 视频', '深圳国际交流监狱', '1分钟前', '']
+        if "包含" in processed_pyq[1] or "视频" in processed_pyq[1]:
+            pyq_contents = "NA"
+    elif "前" in processed_pyq[lineCount - 3]:
+        # 文案：      有/无
+        # 图片 / 视频：无
+        # 地点：      有/无，无所谓，还没记录地点
+        # 嵌入链接：   有
+
+        # 文案：有
+        # ['middleclicker', 'abc', '来点问题！', '1分钟前', 'Tape / QQMusic / Whatever', '']
+        # ['middleclicker', 'abc', '来点问题！', '深圳国际交流监狱', '1分钟前', 'Tape / QQMusic / Whatever', '']
+        media = processed_pyq[lineCount - 2]
+        time = processed_pyq[lineCount - 3]
+
+        # 文案：无
+        # ['middleclicker', '来点问题！', '1分钟前', 'Tape / QQ Music / Whatever', '']
+        if "包含" in processed_pyq[2] or "视频" in processed_pyq[2]:
+            pyq_contents = "NA"
+    else:
+        # 文案：      有
+        # 图片 / 视频：无
+        # 地点：      有/无
+        # 嵌入链接：   无
+        # ['middleclicker', 'abc', 'efg', '1分钟前', '']
+        media = "NA"
+        time = processed_pyq[lineCount - 2]
+    return author, pyq_contents, media, time
+
+
+# Why is it called edits? i dont know ask the original author
+def processEdits(edits):
+    likes = []
+    pinglun = []
+    hasComment = False
+    hasLikes = False
+    for e in edits:
+        if e.friendly_class_name() == "Edit":
+            hasLikes = True
+
+            likes = replace_emoji(e.window_text())
+        if e.friendly_class_name() == "ListBox":
+            hasComment = True
+
+            pinglun = []
+            comments = e.children()
+            for com in comments:
+                if com.friendly_class_name() == "ListItem":
+                    pinglun.append(replace_emoji(com.window_text()))
+    return hasLikes, hasComment, likes, pinglun
+
+
+def getPosts(cur):
+    cur.execute(get_posts)
+    return cur.fetchall()
+
+
+def getUserCount(cur):
+    cur.execute(get_user_count)
+    return cur.fetchone()[0]
+
+
+# endregion
+
+
+try:
+    # region Wechat PID Hook
+    app = Application(backend='uia').connect(process=getPID())
+    # endregion
+    # region Database
+    # Initialization
     conn = psycopg2.connect(host=HOSTNAME, dbname=DATABASE, user=USERNAME, port=PORT_ID)
     cur = conn.cursor()
 
-    # Create data storage tables
-    build_posts_table = ''' CREATE TABLE IF NOT EXISTS posts
-    (
-        uuid            int             PRIMARY KEY NOT NULL,
-        name            text            NOT NULL,
-        content         text,
-        media           int,
-        date            date,
-        likes           text,
-        like_count      int             NOT NULL,
-        comments        text,
-        comment_count   int             NOT NULL,
-        scraped_date    timestamptz     NOT NULL,
-        contributor     text            NOT NULL,
-        count           int   
-    );'''
-    build_user_table = ''' CREATE TABLE IF NOT EXISTS users
-    (
-        name                    text            PRIMARY KEY NOT NULL,
-        total_posts             int             NOT NULL,
-        total_media             int             NOT NULL,
-        total_words             int             NOT NULL,
-        total_word_count_eng    int             NOT NULL,
-        total_word_count_chn    int             NOT NULL,
-        total_emoji_count       int             NOT NULL,
-        total_likes_recieved    int             NOT NULL,
-        total_comments_recieved int             NOT NULL,
-        total_likes_given       int             NOT NULL,
-        total_comments_given    int             NOT NULL,
-        frequent_likes          jsonb,
-        frequent_likes_to       jsonb,
-        frequent_commenters     jsonb,
-        frequent_comments_to    jsonb,
-        active_dates            jsonb,
-        count                   int
-    );'''
-    posts_insert_script = ''' INSERT INTO posts 
-    (
-        uuid, 
-        name, 
-        content, 
-        media, 
-        date, 
-        likes, 
-        like_count, 
-        comments, 
-        comment_count, 
-        scraped_date, 
-        contributor, 
-        count
-    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);'''
-    user_insert_script = ''' INSERT INTO users
-    (
-        name,
-        total_posts,
-        total_media,
-        total_words,
-        total_word_count_eng,
-        total_word_count_chn,
-        total_emoji_count,
-        total_likes_recieved,
-        total_comments_recieved,
-        total_likes_given,
-        total_comments_given,
-        frequent_likes,
-        frequent_likes_to,
-        frequent_commenters,
-        frequent_comments_to,
-        active_dates,
-        count
-    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);'''
-    get_post_count = '''SELECT COUNT(*) FROM posts;'''
-    get_posts = '''SELECT * FROM posts ORDER BY count ASC'''
-    get_user_count = '''SELECT COUNT(*) FROM users;'''
-    cur.execute(build_posts_table)
-    cur.execute(build_user_table)
-    cur.execute(get_post_count)
-    initialPostCount = cur.fetchone()[0]
-
+    setupDatabaseTables(cur)
+    initialPostCount = getPostCount(cur)
+    # endregion
+    # region Data Collection
     all_pyq = []
     pyq_uuids = []
     pk_list = []
-    has_updated = False
-    last_content_cnt = 0
-
-    # ------------Data Collection------------
+    # has_updated = False
     print("Collecting Data")
-
-    # Data structure:
-    # pyq_info:
-    #   0: UUID
-    #   1: Author
-    #   2: Content
-    #   3: Media Count
-    #   4: Time
-    #   5: Likes
-    #   6: Comments
-    #   7: Scraped Time
-    #   8: Scraper Name
 
     while True:
         try:
@@ -383,106 +516,22 @@ try:
                     pyq_info = []
                     if pyq.friendly_class_name() == "ListItem":  # Post detected
                         processed_pyq = replace_emoji(pyq.window_text()).split('\n')
-
-                        lineCount = len(processed_pyq)
-
-                        author = processed_pyq[0]
-                        pyq_contents = "".join(processed_pyq[1:lineCount - 3])
-
-                        if "包含" in processed_pyq[lineCount - 3] or "视频" in processed_pyq[lineCount - 3]:
-                            # 文案：      有/无
-                            # 图片 / 视频：有
-                            # 地点：      无
-                            # 嵌入链接：   无
-
-                            # 文案：有
-                            # ['middleclicker', 'abc', 'efg', '包含2张图片 / 视频', '1分钟前', '']
-                            # ['middleclicker', 'abc', '包含2张图片 / 视频', '1分钟前', '']
-                            media = processed_pyq[lineCount - 3]
-                            time = processed_pyq[lineCount - 2]
-
-                            # 文案：无
-                            # ['middleclicker', '包含2张图片 / 视频', '1分钟前', '']
-                            if "包含" in processed_pyq[1] or "视频" in processed_pyq[1]:
-                                pyq_contents = "NA"
-                        elif "包含" in processed_pyq[lineCount - 4] or "视频" in processed_pyq[lineCount - 4]:
-                            # 文案：      有/无
-                            # 图片 / 视频：有
-                            # 地点：      有
-                            # 嵌入链接：   无
-
-                            # 文案：有
-                            # ['middleclicker', 'abc', 'efg', '包含2张图片 / 视频', '深圳国际交流监狱', '1分钟前', '']
-                            media = processed_pyq[lineCount - 4]
-                            time = processed_pyq[lineCount - 2]
-
-                            # 文案：无
-                            # ['middleclicker', '包含2张图片 / 视频', '深圳国际交流监狱', '1分钟前', '']
-                            if "包含" in processed_pyq[1] or "视频" in processed_pyq[1]:
-                                pyq_contents = "NA"
-                        elif "前" in processed_pyq[lineCount - 3]:
-                            # 文案：      有/无
-                            # 图片 / 视频：无
-                            # 地点：      有/无，无所谓，还没记录地点
-                            # 嵌入链接：   有
-
-                            # 文案：有
-                            # ['middleclicker', 'abc', '来点问题！', '1分钟前', 'Tape / QQMusic / Whatever', '']
-                            # ['middleclicker', 'abc', '来点问题！', '深圳国际交流监狱', '1分钟前', 'Tape / QQMusic / Whatever', '']
-                            media = processed_pyq[lineCount - 2]
-                            time = processed_pyq[lineCount - 3]
-
-                            # 文案：无
-                            # ['middleclicker', '来点问题！', '1分钟前', 'Tape / QQ Music / Whatever', '']
-                            if "包含" in processed_pyq[2] or "视频" in processed_pyq[2]:
-                                pyq_contents = "NA"
-                        else:
-                            # 文案：      有
-                            # 图片 / 视频：无
-                            # 地点：      有/无
-                            # 嵌入链接：   无
-                            # ['middleclicker', 'abc', 'efg', '1分钟前', '']
-                            media = "NA"
-                            time = processed_pyq[lineCount - 2]
-
+                        author, pyq_contents, media, time = pyqContentCases(processed_pyq)
                         processed_time = calc_time(time)
                         if processed_time == -1:  # Posts are older than a week
                             raise GetOutOfLoop
-
                         uuid = generate_uuid(pyq_contents, author)
-
-                        if uuid in pyq_uuids: # how the fuck do duplicates still get in???
-                            last_content_cnt += 1
+                        if uuid in pyq_uuids:  # how the fuck do duplicates still get in???
                             continue
                         pyq_uuids.append(pyq_contents)
-
                         pyq_info.append(uuid)
                         pyq_info.append(author)
                         pyq_info.append(pyq_contents)
                         pyq_info.append(process_raw_media(media))
                         pyq_info.append(processed_time)
-
                         try:
-                            hasComment = False
-                            hasLikes = False
-
                             edits = DFS(pyq, 6)
-                            likes = []
-                            pinglun = []
-                            for e in edits:
-                                if e.friendly_class_name() == "Edit":
-                                    hasLikes = True
-
-                                    likes = replace_emoji(e.window_text())
-                                if e.friendly_class_name() == "ListBox":
-                                    hasComment = True
-
-                                    pinglun = []
-                                    comments = e.children()
-                                    for com in comments:
-                                        if com.friendly_class_name() == "ListItem":
-                                            pinglun.append(replace_emoji(com.window_text()))
-
+                            hasLikes, hasComment, likes, pinglun = processEdits(edits)
                             if hasLikes:
                                 pyq_info.append(likes)
                                 pyq_info.append(len(likes.split('，')))
@@ -510,44 +559,22 @@ try:
         except Exception:
             pass
 
-        post_count = len(all_pyq)
         refresh = (pyq_win.rectangle().left + 50, pyq_win.rectangle().top + 10)
         scroll = (pyq_win.rectangle().left + 10, pyq_win.rectangle().bottom - 10)
-        if post_count < MAX_PYQ:
-            pywinauto.mouse.scroll(wheel_dist=-SCROLL_DIST, coords=scroll) # Scroll down
-        # elif post_count >= MAX_PYQ and not has_updated:
-        #     print("Uploading Data")
-        #     # TODO: Count returning weird numbers... i actually have no idea why this is happening
-        #     # TODO: The amount of duplicates is insane...
-        #     for e in all_pyq:
-        #         cur.execute(get_post_count)
-        #         total_posts = cur.fetchone()[0]
-        #         try:
-        #             if e[0] not in pk_list:
-        #                 new_e = e
-        #                 new_e.append(total_posts + 1)
-        #                 if len(new_e) > 12:
-        #                     print(new_e)
-        #                     continue
-        #                 cur.execute(posts_insert_script, new_e)
-        #                 pk_list.append(new_e[0])
-        #         except psycopg2.IntegrityError:  # Ignore duplicated key error
-        #             conn.rollback()
-        #         else:
-        #             conn.commit()
-        #     break
+        if getPostCount(cur) < MAX_PYQ:
+            pywinauto.mouse.scroll(wheel_dist=-SCROLL_DIST, coords=scroll)  # Scroll down
         else:
             break
 
-        if post_count % UPDATE_FREQ == 0:
-            for e in all_pyq[post_count - UPDATE_FREQ:post_count]:
-                cur.execute(get_post_count)
-                total_posts = cur.fetchone()[0]
+        # Update freq must be set to 1, or you're gonna miss uploading the last few posts...
+        if len(all_pyq) % UPDATE_FREQ == 0:
+            for e in all_pyq[len(all_pyq) - UPDATE_FREQ:len(all_pyq)]:
+                total_posts = getPostCount(cur)
                 try:
-                    if e[0] not in pk_list:
+                    if e[0] not in pk_list:  # Double failsafe i guess?
                         new_e = e
                         new_e.append(total_posts + 1)
-                        if len(new_e) > 12:
+                        if len(new_e) > 12:  # 12 columns
                             print(new_e)
                             continue
                         cur.execute(posts_insert_script, new_e)
@@ -556,19 +583,18 @@ try:
                     conn.rollback()
                 else:
                     conn.commit()
-
-    # ------------Data Processing------------
+    # endregion
+    # region Data Processing
     print("Processing Data")
     if PROCESS_ALL:
-        cur.execute(get_posts)
-        all_db_posts = cur.fetchall()
+        all_db_posts = getPosts(cur)
         all_users = []
         for row in all_db_posts:
             name = row[1]
             content = row[2]
             english, chinese, symbols = processChineseEnglish(content)
             post_likes = generateFreqLikes(row[5])
-            post_comments = generateFreqComments(row[5])
+            post_comments = generateFreqComments(row[7])
             userIndex = findUserNestedList(name, all_users)
             if userIndex == -1:
                 total_posts = 1
@@ -581,9 +607,9 @@ try:
                 total_comments_recieved = row[8]
                 total_likes_given = 0
                 total_comments_given = 0
-                frequent_likes = generateFreqLikes(row[5])
+                frequent_likes = post_likes
                 frequent_likes_to = {}
-                frequent_commenters = generateFreqComments(row[7])
+                frequent_commenters = post_comments
                 frequent_comments_to = {}
                 active_dates = {row[4].strftime("20%y-%m-%d"): 1}
             else:
@@ -647,7 +673,7 @@ try:
                         active_dates=json.dumps({})
                     ))
                 else:
-                    all_users[likerIndex][8] += 1
+                    all_users[likerIndex][9] += 1
                     updated_likers = json.loads(all_users[likerIndex][12])
                     if name in updated_likers:
                         updated_likers[name] += 1
@@ -676,27 +702,25 @@ try:
                         active_dates=json.dumps({})
                     ))
                 else:
-                    all_users[commentorIndex][9] += 1
-                    updated_commenters = json.loads(all_users[commentorIndex][12])
+                    all_users[commentorIndex][10] += 1
+                    updated_commenters = json.loads(all_users[commentorIndex][14])
                     if name in updated_commenters:
                         updated_commenters[name] += 1
                     else:
                         updated_commenters[name] = 1
-                    all_users[commentorIndex][13] = json.dumps(updated_commenters)
+                    all_users[commentorIndex][14] = json.dumps(updated_commenters)
 
         usersUpdated = 0
         print("Uploading User Data")
         for e in all_users:
-            cur.execute(get_user_count)
-            total_users = cur.fetchone()[0]
+            total_users = getUserCount(cur)
             initialUserCount = total_users
             try:
                 # NOTE: USE SINGLE QUOTES
                 new_e = e
                 new_e.append(total_users + 1)
-                # print(new_e)
                 cur.execute(f'''SELECT EXISTS(SELECT 1 FROM users WHERE name='{new_e[0]}');''')
-                if not cur.fetchone()[0]: # If user already exists
+                if not cur.fetchone()[0]:  # If user already exists
                     usersUpdated += 1
                     cur.execute(f'''DELETE FROM users WHERE name='{new_e[0]}';''')
                 cur.execute(user_insert_script, new_e)
@@ -708,11 +732,8 @@ try:
             else:
                 conn.commit()
 
-        cur.execute(get_post_count)
-        endPostCount = cur.fetchone()[0]
-        cur.execute(get_user_count)
-        endUserCount = cur.fetchone()[0]
-        logScrapeStatistics(initialPostCount, endPostCount, initialUserCount, endUserCount, usersUpdated)
+        logScrapeStatistics(initialPostCount, getPostCount(cur), initialUserCount, getUserCount(cur), usersUpdated)
+    # endregion
 except Exception as error:
     print(error)
     pass
