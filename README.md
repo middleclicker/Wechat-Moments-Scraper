@@ -38,6 +38,7 @@ Create an issue if you find one.
 # Todo
 - ~~Fix different content cases~~ Added comments, fixed logic errors
 - ~~Add data processing module~~ Added
+- Comment and like count are still broken for some reason... I'm not sure why
 - Code Cleanup (Rename functions, recode some parts, etc.)
 - Scroll Randomization
 - User stats dialogue generator
